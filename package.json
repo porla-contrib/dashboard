@@ -1,6 +1,6 @@
 {
   "name": "@porla-contrib/dashboard",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A web dashboard for Porla.",
   "main": "index.js",
   "scripts": {
