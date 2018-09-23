@@ -41,7 +41,8 @@ class DashboardPlugin extends Plugin {
                         infoHash: val.infoHash,
                         name: val.name,
                         progress: val.progress,
-                        savePath: val.savePath
+                        savePath: val.savePath,
+                        size: val.stats.sizeWanted
                     }
                 })
             };
@@ -84,7 +85,8 @@ class DashboardPlugin extends Plugin {
                 infoHash: torrent.infoHash,
                 name: torrent.name,
                 progress: torrent.progress,
-                savePath: torrent.savePath
+                savePath: torrent.savePath,
+                size: torrent.stats.sizeWanted
             }
         };
 
@@ -120,7 +122,8 @@ class DashboardPlugin extends Plugin {
                     infoHash: val.infoHash,
                     name: val.name,
                     progress: val.progress,
-                    savePath: val.savePath
+                    savePath: val.savePath,
+                    size: val.stats.sizeWanted
                 }
             })
         };

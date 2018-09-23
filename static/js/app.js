@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             existing.name = torrent.name;
                             existing.progress = torrent.progress;
                             existing.savePath = torrent.savePath;
+                            existing.size = torrent.size;
                         }
                         break;
                 }
