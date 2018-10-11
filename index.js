@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const { Plugin, Porla } = require('@porla/porla');
 const http = require('http');
 const WebSocketServer = require('ws').Server;
@@ -19,11 +20,10 @@ class DashboardPlugin extends Plugin {
      */
     load(porla) {
         this.app = express();
-
-        this.app.use('/bulma', express.static(__dirname + '/node_modules/bulma'));
-        this.app.use('/filesize', express.static(__dirname + '/node_modules/filesize'));
-        this.app.use('/vue', express.static(__dirname + '/node_modules/vue'));
-        this.app.use('/', express.static(__dirname + '/static'));
+        this.app.use('/', express.static(path.join(__dirname, '/dist')));
+        this.app.get('*', function (request, response) {
+            response.sendFile(path.resolve(__dirname, 'dist/index.html'));
+        });
 
         this.server = http.createServer(this.app);
 
