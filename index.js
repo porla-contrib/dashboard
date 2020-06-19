@@ -1,145 +1,106 @@
+const bodyParser = require('body-parser');
 const express = require('express');
-const { Plugin, Porla } = require('@porla/porla');
 const http = require('http');
+const path = require('path');
 const WebSocketServer = require('ws').Server;
 
-class DashboardPlugin extends Plugin {
-    /**
-     * @param {Object?} options Instance options.
-     * @param {Number?} options.httpPort The HTTP port to serve the dashboard on.
-     */
-    constructor(options) {
-        super();
-        this._options = options || {};
-    }
-
-    /**
-     * 
-     * @param {Porla} porla
-     */
-    load(porla) {
-        this.app = express();
-
-        this.app.use('/bulma', express.static(__dirname + '/node_modules/bulma'));
-        this.app.use('/filesize', express.static(__dirname + '/node_modules/filesize'));
-        this.app.use('/vue', express.static(__dirname + '/node_modules/vue'));
-        this.app.use('/', express.static(__dirname + '/static'));
-
-        this.server = http.createServer(this.app);
-
-        this.wss = new WebSocketServer({
-            path: '/ws',
-            server: this.server
-        });
-
-        this.wss.on('connection', (socket) => {
-            const torrents = Array.from(porla.torrents);
-            const data = {
-                event: 'init',
-                torrents: torrents.map(val => {
-                    return {
-                        infoHash: val.infoHash,
-                        name: val.name,
-                        progress: val.progress,
-                        savePath: val.savePath,
-                        size: val.stats.sizeWanted
-                    }
-                })
-            };
-
-            socket.send(JSON.stringify(data));
-            socket.inited = true;
-        });
-
-        porla.subscribe('torrent.added', [
-            (arg) => this.onTorrentAdded(arg.torrent)
-        ]);
-
-        porla.subscribe('torrent.removed', [
-            (arg) => this.onTorrentRemoved(arg.infoHash)
-        ]);
-
-        porla.subscribe('torrents.statistics', [
-            (arg) => this.onTorrentsStatistics(arg.stats)
-        ])
-
-        porla.subscribe('torrents.updated', [
-            (arg) => this.onTorrentsUpdated(arg.torrents)
-        ]);
-
-        return new Promise((resolve, reject) => {
-            this.server.listen(this._options.httpPort || 3000, (err) => {
-                if (err) {
-                    return reject(err);
-                }
-
-                return resolve();
-            });
-        });
-    }
-
-    onTorrentAdded(torrent) {
-        const data = {
-            event: 'torrentAdded',
-            torrent: {
-                infoHash: torrent.infoHash,
-                name: torrent.name,
-                progress: torrent.progress,
-                savePath: torrent.savePath,
-                size: torrent.stats.sizeWanted
-            }
-        };
-
-        this._broadcast(data);
-    }
-
-    onTorrentRemoved(infoHash) {
-        const data = {
-            event: 'torrentRemoved',
-            infoHash: infoHash
-        };
-
-        this._broadcast(data);
-    }
-
-    onTorrentsStatistics(stats) {
-        const data = {
-            event: 'torrentsStatistics',
-            stats: {
-                downloadRate: stats.downloadPayloadRate,
-                uploadRate: stats.uploadPayloadRate
-            }
-        };
-
-        this._broadcast(data);
-    }
-
-    onTorrentsUpdated(torrents) {
-        const data = {
-            event: 'torrentsUpdated',
-            torrents: torrents.map(val => {
-                return {
-                    infoHash: val.infoHash,
-                    name: val.name,
-                    progress: val.progress,
-                    savePath: val.savePath,
-                    size: val.stats.sizeWanted
-                }
-            })
-        };
-
-        this._broadcast(data);
-    }
-
-    _broadcast(data) {
-        for (const client of this.wss.clients) {
-            if (!client.inited) {
-                continue;
-            }
-
-            client.send(JSON.stringify(data));
-        }
+function mapTorrent(torrent) {
+    return {
+        infoHash: torrent.infoHash,
+        name: torrent.name,
+        savePath: torrent.savePath,
+        progress: torrent.progress,
+        state: torrent.state,
     }
 }
 
-module.exports = DashboardPlugin;
+module.exports = function dashboard(options) {
+    options = options || {};
+
+    const port = options.port || 3000;
+
+    return function impl(porla) {
+        const app = express();
+        app.use(express.static(path.join(__dirname, 'public')));
+        app.use(bodyParser.json({ limit: '50mb' }));
+        app.post('/api/jsonrpc', (req, res) => {
+            const { method, params } = req.body;
+
+            // TODO: Validate JSONRPC call
+
+            switch (method) {
+                case 'addMagnetLink':
+                    if (Array.isArray(params)) {
+                        porla.addMagnetLink(params[0], params[1] || {});
+                    } else {
+                        porla.addMagnetLink(params);
+                    }
+                    break;
+
+                case 'addTorrentFile':
+                    const buf = Buffer.from(params[0], 'base64');
+                    const options = params[1] || {};
+                    porla.addTorrent(buf, options);
+                    break;
+
+                case 'removeTorrent':
+                    const infoHash = params[0];
+                    const removeFiles = !!params[1];
+                    porla.removeTorrent(infoHash, removeFiles);
+                    break;
+            }
+
+            res.send('OK');
+        });
+        const server = http.createServer(app);
+        
+        const wss = new WebSocketServer({ server, path: '/api/events' });
+        wss.on('connection', (socket) => {
+            const torrents = Array.from(porla.torrents());
+
+            const init = {
+                event: 'init',
+                torrents: torrents.map(mapTorrent)
+            }
+
+            socket.send(JSON.stringify(init));
+        });
+
+        porla.on('torrent.added', ({ torrent }) => {
+            for (const client of wss.clients) {
+                client.send(JSON.stringify({
+                    event: 'torrent.added',
+                    torrent: mapTorrent(torrent)
+                }));
+            }
+        });
+
+        porla.on('torrent.removed', ({ torrent }) => {
+            for (const client of wss.clients) {
+                client.send(JSON.stringify({
+                    event: 'torrent.removed',
+                    torrent: { infoHash: torrent.infoHash }
+                }));
+            }
+        })
+
+        porla.on('torrents.updated', ({ torrents }) => {
+            const data = {
+                event: 'torrents.updated',
+                torrents: torrents.map(mapTorrent)
+            }
+
+            for (const socket of wss.clients) {
+                socket.send(JSON.stringify(data));
+            }
+        });
+
+        return new Promise((resolve, reject) => {
+            server.listen(port || 3000, (err) => {
+                if (err) return reject(err);
+                porla.log.info(`Dashboard available at http://localhost:${port || 3000}`);
+                resolve();
+            });
+        })
+    }
+}
