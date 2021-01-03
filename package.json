@@ -30,7 +30,7 @@
     "ws": "^6.0.0"
   },
   "peerDependencies": {
-    "@porla/porla": "^0.20.0"
+    "porla": "^0.20.0"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^13.0.0",
